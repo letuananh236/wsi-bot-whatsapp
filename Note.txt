@@ -1,0 +1,87 @@
+cd "Bot Whataap"
+
+d:
+
+
+D:
+cd "Bot WhatsApp"
+pm2 list
+pm2 start bot1.js --name "whatsapp-bot"
+pm2 start bot1.js --name "whatsapp-bot"
+pm2 monit
+
+pm2 start bot1.js --name "whatsapp-bot"
+pm2 restart whatsapp-bot
+pm2 delete whatsapp-bot
+dir
+
+D:
+cd "Bot Whataap"
+node bot1.js
+
+
+
+D:
+cd "Bot Whataap"
+node danhsach.js
+
+
+
+PS D:\Bot Whataap> node danhsach.js
+✅ Bot WhatsApp đã sẵn sàng!
+Tổng số cuộc trò chuyện: 13
+Chat: BÁO GIAO HÀNG BÁO LỖI - id: 120363399148489869@g.us
+Chat: CÔNG VIỆC CHUNG - id: 120363400826845750@g.us
+Chat: Biện số Cty - id: 84333355056@c.us
+Chat: E Hà - Meditop - id: 84393835518@c.us
+Chat: BOT - id: 120363386567073074@g.us
+Chat: Kỹ Thuật Hà Nội - id: 120363386017918826@g.us
+Chat: E Kiểm - Meditop - id: 84973400890@c.us
+Chat: E Tuấn - Meditop - id: 84979656593@c.us
+Chat: Quốc Anh - id: 84367477992@c.us
+Chat: Kỹ thuật MEDITOP - id: 120363383960061901@g.us
+Chat: E Quân Meditop - id: 84966476296@c.us
+Chat: Chị Hân - Meditop - id: 84984920382@c.us
+Chat: Kỹ Thuật Hà Nội - id: 120363381967078145@g.us
+
+Nhóm: BÁO GIAO HÀNG BÁO LỖI - ID nhóm: 120363399148489869@g.us
+Không có thông tin thành viên cho nhóm này.
+
+Nhóm: CÔNG VIỆC CHUNG - ID nhóm: 120363400826845750@g.us
+Không có thông tin thành viên cho nhóm này.
+
+Nhóm: BOT - ID nhóm: 120363386567073074@g.us
+Không có thông tin thành viên cho nhóm này.
+
+Nhóm: Kỹ Thuật Hà Nội - ID nhóm: 120363386017918826@g.us
+Không có thông tin thành viên cho nhóm này.
+
+Nhóm: Kỹ thuật MEDITOP - ID nhóm: 120363383960061901@g.us
+Không có thông tin thành viên cho nhóm này.
+
+Nhóm: Kỹ Thuật Hà Nội - ID nhóm: 120363381967078145@g.us
+Không có thông tin thành viên cho nhóm này.
+
+'84335528919': 'Xuyên',
+  '84984183573': 'Ly',
+  '84393835518': 'Hà',
+  '84986481230': 'E Dung',
+  '84979656593': 'E Tuấn',
+  '84333355056': 'Biện',
+  '84984920382': 'C Hân',
+  '84339869149': 'E Thành',
+  '84989781705': 'C Liên',
+  '84918283236': 'Lee Anh',
+  '84867601068': 'A Vỹ',
+  '84964151628': 'Nhài',
+  '84931546323': 'Hùng',
+  '84946446386': 'Trường',
+  '84364921368': 'Hằng',
+  '84944562920': 'Nga',
+  '84906444294': 'Sang',
+  '84775003236': 'Người Gửi Lệnh', // Thêm số được phép gửi lệnh nếu cần ánh xạ tên
+  '84376937039': 'Tiến',
+  '84973400890': 'Kiểm',
+  '84936214486': 'Thảo',
+  '84984738113': 'Cường',
+  '84967073973': 'Trang',  

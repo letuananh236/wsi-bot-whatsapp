@@ -1,0 +1,15 @@
+{
+  "dependencies": {
+    "@google/generative-ai": "^0.22.0",
+    "canvas": "^3.1.0",
+    "google-auth-library": "^8.9.0",
+    "google-spreadsheet": "^3.3.0",
+    "luxon": "^3.5.0",
+    "moment-timezone": "^0.5.47",
+    "natural": "^8.0.1",
+    "node-cron": "^3.0.3",
+    "p-retry": "^6.2.1",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.0"
+  }
+}
