@@ -29,12 +29,14 @@ const logger = winston.createLogger({
 // Cache Google Sheet và Puppeteer
 let cachedSheet = null;
 let browserInstance = null;
+let configWarningLogged = false;
 
 /**
  * Xóa cache sheet khi thay đổi thông tin cấu hình
  */
 function resetSheetCache() {
   cachedSheet = null;
+  configWarningLogged = false;
 }
 
 /**
@@ -45,6 +47,7 @@ function resetSheetCache() {
 async function getSheet(month = null) {
   try {
     await ensureSheetConfigAvailable();
+    configWarningLogged = false;
     if (cachedSheet && (!month || cachedSheet.month === month)) {
       return cachedSheet.sheet;
     }
@@ -76,7 +79,14 @@ async function getSheet(month = null) {
     cachedSheet = { sheet, month: targetMonth };
     return sheet;
   } catch (error) {
-    logger.error('Lỗi truy cập Google Sheets', { error });
+    if (error && error.code === 'CONFIG_MISSING') {
+      if (!configWarningLogged) {
+        logger.warn(error.message);
+        configWarningLogged = true;
+      }
+    } else {
+      logger.error('Lỗi truy cập Google Sheets', { error });
+    }
     throw error;
   }
 }
