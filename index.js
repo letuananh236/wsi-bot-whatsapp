@@ -10,6 +10,7 @@ const cron = require('node-cron');
 const pRetry = require('p-retry');
 const winston = require('winston');
 const config = require('./config');
+const { startWebServer } = require('./server/webServer');
 
 // Khởi tạo logger
 const logger = winston.createLogger({
@@ -28,6 +29,13 @@ const logger = winston.createLogger({
 // Cache Google Sheet và Puppeteer
 let cachedSheet = null;
 let browserInstance = null;
+
+/**
+ * Xóa cache sheet khi thay đổi thông tin cấu hình
+ */
+function resetSheetCache() {
+  cachedSheet = null;
+}
 
 /**
  * Truy cập Google Sheet với retry logic
@@ -60,7 +68,7 @@ async function getSheet(month = null) {
     }
 
     if (!sheet.headerValues || !arraysEqual(sheet.headerValues, config.HEADERS)) {
-      await sheet.setHeaderRow(config.headers);
+      await sheet.setHeaderRow(config.HEADERS);
       logger.info(`Đã thiết lập tiêu đề cho sheet: ${sheetTitle}`);
     }
 
@@ -93,6 +101,28 @@ async function loadCreds() {
   } catch (error) {
     logger.error('Không thể đọc file credentials', { error });
     throw error;
+  }
+}
+
+/**
+ * Lưu credentials xuống file
+ * @param {{client_email: string, private_key: string}} creds
+ */
+async function saveCreds(creds) {
+  await fs.writeFile(config.SERVICE_ACCOUNT_FILE, JSON.stringify(creds, null, 2), 'utf8');
+  resetSheetCache();
+}
+
+/**
+ * Kiểm tra file credentials đã tồn tại chưa
+ * @returns {Promise<boolean>}
+ */
+async function credentialsExist() {
+  try {
+    await fs.access(config.SERVICE_ACCOUNT_FILE);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -226,6 +256,32 @@ function generateReportHTML(rows, title) {
 }
 
 /**
+ * Lọc dữ liệu báo cáo dựa trên loại báo cáo
+ * @param {Array} rows - Danh sách hàng từ Google Sheet
+ * @param {DateTime} date - Ngày cần lọc
+ * @param {'daily'|'tomorrow'} reportType - Loại báo cáo
+ * @returns {Array} - Danh sách hàng đã lọc
+ */
+function filterRowsForReport(rows, date, reportType) {
+  const formattedDate = date.toFormat('dd/MM/yyyy');
+
+  if (reportType === 'daily') {
+    return rows.filter(row =>
+      row['Nội dung công việc'] !== `Ngày ${formattedDate}` &&
+      row['Thời gian']?.startsWith(formattedDate) &&
+      (row['Tiến Độ'] === 'Chưa Hoàn Thành' || row['Tiến Độ'] === 'Hoàn Thành')
+    );
+  }
+
+  return rows.filter(row =>
+    row['Thời gian']?.startsWith(formattedDate) &&
+    row['Nội dung công việc'] &&
+    !row['Nội dung công việc'].match(/^Ngày\s/) &&
+    row['Tiến Độ'] !== 'Hoàn Thành'
+  );
+}
+
+/**
  * Tạo báo cáo và lưu thành ảnh
  * @param {GoogleSpreadsheetWorksheet} sheet - Sheet Google
  * @param {DateTime} date - Ngày báo cáo
@@ -237,22 +293,7 @@ async function generateReport(sheet, date, reportType, titlePrefix) {
   try {
     const formattedDate = date.toFormat('dd/MM/yyyy');
     const rows = await sheet.getRows();
-    let filteredRows;
-
-    if (reportType === 'daily') {
-      filteredRows = rows.filter(row =>
-        row['Nội dung công việc'] !== `Ngày ${formattedDate}` &&
-        row['Thời gian']?.startsWith(formattedDate) &&
-        (row['Tiến Độ'] === 'Chưa Hoàn Thành' || row['Tiến Độ'] === 'Hoàn Thành')
-      );
-    } else {
-      filteredRows = rows.filter(row =>
-        row['Thời gian']?.startsWith(formattedDate) &&
-        row['Nội dung công việc'] &&
-        !row['Nội dung công việc'].match(/^Ngày\s/) &&
-        row['Tiến Độ'] !== 'Hoàn Thành'
-      );
-    }
+    const filteredRows = filterRowsForReport(rows, date, reportType);
 
     if (filteredRows.length === 0) {
       logger.warn(`Không có dữ liệu cho ${reportType} báo cáo ngày ${formattedDate}`);
@@ -278,6 +319,8 @@ async function generateReport(sheet, date, reportType, titlePrefix) {
     return null;
   }
 }
+
+
 
 /**
  * Gửi báo cáo qua WhatsApp
@@ -617,6 +660,18 @@ client.on('message', async msg => {
       await msg.reply('Có lỗi xảy ra, vui lòng thử lại!');
     }
   }
+});
+
+startWebServer({
+  config,
+  logger,
+  credentialsExist,
+  saveCreds,
+  resetSheetCache,
+  getSheet,
+  filterRowsForReport,
+  generateReportHTML,
+  DateTime
 });
 
 // Khởi động bot

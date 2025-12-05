@@ -15,6 +15,7 @@ module.exports = {
   TARGET_GROUP_ID: '120363399148489869@g.us',
   BOT_PHONE_NUMBER: '84918283236@c.us',
   AUTHORIZED_PHONE_NUMBER: '84775003236@c.us',
+  WEB_PORT: process.env.WEB_PORT || 3000,
   phoneNameMap: {
     '84335528919': 'Xuyên',
     '130163849359563@lid': 'Ly',
