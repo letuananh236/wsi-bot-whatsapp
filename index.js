@@ -569,12 +569,53 @@ async function scheduleCronJobs(sheet) {
 
 // Khởi tạo WhatsApp client
 const client = new Client({
-  authStrategy: new LocalAuth()
+  authStrategy: new LocalAuth(),
+  puppeteer: {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    executablePath: puppeteer.executablePath()
+  }
 });
+
+let initializingClient = false;
+
+async function initializeWhatsAppClient() {
+  if (initializingClient) return;
+  initializingClient = true;
+
+  try {
+    logger.info('Khởi động WhatsApp client...');
+    await client.initialize();
+  } catch (error) {
+    logger.error('Khởi động WhatsApp client thất bại, sẽ thử lại sau.', { error });
+    setTimeout(() => initializeWhatsAppClient(), 5000);
+  } finally {
+    initializingClient = false;
+  }
+}
+
+async function restartWhatsAppClient(reason) {
+  logger.warn(`WhatsApp client bị ngắt kết nối (${reason || 'không rõ lý do'}). Đang khởi động lại...`);
+  try {
+    await client.destroy();
+  } catch (destroyError) {
+    logger.warn('Lỗi khi hủy client cũ trước khi khởi động lại', { error: destroyError });
+  }
+  setTimeout(() => initializeWhatsAppClient(), 5000);
+}
 
 client.on('qr', qr => {
   logger.info('Tạo QR code để đăng nhập WhatsApp');
   qrcode.generate(qr, { small: true });
+});
+
+client.on('disconnected', reason => {
+  restartWhatsAppClient(reason);
+});
+
+client.on('auth_failure', message => {
+  logger.error(`Xác thực WhatsApp thất bại: ${message}. Sẽ thử khởi động lại.`);
+  restartWhatsAppClient('auth_failure');
 });
 
 client.on('ready', async () => {
@@ -711,5 +752,5 @@ startWebServer({
   DateTime
 });
 
-// Khởi động bot
-client.initialize();
+// Khởi động bot với cơ chế tự phục hồi khi phiên trình duyệt lỗi
+initializeWhatsAppClient();
