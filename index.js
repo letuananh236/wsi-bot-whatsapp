@@ -44,6 +44,7 @@ function resetSheetCache() {
  */
 async function getSheet(month = null) {
   try {
+    await ensureSheetConfigAvailable();
     if (cachedSheet && (!month || cachedSheet.month === month)) {
       return cachedSheet.sheet;
     }
@@ -77,6 +78,25 @@ async function getSheet(month = null) {
   } catch (error) {
     logger.error('Lỗi truy cập Google Sheets', { error });
     throw error;
+  }
+}
+
+class ConfigMissingError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ConfigMissingError';
+    this.code = 'CONFIG_MISSING';
+  }
+}
+
+async function ensureSheetConfigAvailable() {
+  if (!config.SHEET_ID) {
+    throw new ConfigMissingError('Chưa cấu hình SHEET_ID. Vui lòng nhập Sheet ID trên dashboard.');
+  }
+
+  const hasCreds = await credentialsExist();
+  if (!hasCreds) {
+    throw new ConfigMissingError('Chưa có tài khoản dịch vụ Google. Vui lòng tải credentials trên dashboard.');
   }
 }
 
@@ -563,6 +583,10 @@ client.on('ready', async () => {
     const sheet = await getSheet();
     await scheduleCronJobs(sheet);
   } catch (error) {
+    if (error && error.code === 'CONFIG_MISSING') {
+      logger.warn(`${error.message} Bỏ qua khởi động cron cho đến khi cấu hình xong.`);
+      return;
+    }
     logger.error('Lỗi khi khởi động bot', { error });
   }
 });
@@ -571,7 +595,19 @@ client.on('message', async msg => {
   try {
     const chat = await msg.getChat();
     const senderId = msg.from;
-    const sheet = await getSheet();
+    let sheet;
+    try {
+      sheet = await getSheet();
+    } catch (error) {
+      if (error && error.code === 'CONFIG_MISSING') {
+        logger.warn('Bỏ qua xử lý tin nhắn vì chưa cấu hình Google Sheets.');
+        if (senderId === config.AUTHORIZED_PHONE_NUMBER && msg.to === config.BOT_PHONE_NUMBER) {
+          await msg.reply(error.message);
+        }
+        return;
+      }
+      throw error;
+    }
 
     // Lưu tin nhắn từ nhóm mục tiêu
     if (chat.id._serialized.trim() === config.TARGET_GROUP_ID.trim()) {
@@ -668,6 +704,7 @@ startWebServer({
   credentialsExist,
   saveCreds,
   resetSheetCache,
+  ensureSheetConfigAvailable,
   getSheet,
   filterRowsForReport,
   generateReportHTML,

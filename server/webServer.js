@@ -8,6 +8,7 @@ function createRouter({
   credentialsExist,
   saveCreds,
   resetSheetCache,
+  ensureSheetConfigAvailable,
   getSheet,
   filterRowsForReport,
   generateReportHTML,
@@ -27,6 +28,15 @@ function createRouter({
     const respondJson = (payload) => {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(payload));
+    };
+
+    const handleConfigError = (error) => {
+      if (error && error.code === 'CONFIG_MISSING') {
+        res.statusCode = 400;
+        respondJson({ message: error.message });
+        return true;
+      }
+      return false;
     };
 
     if (req.method === 'GET' && pathname === '/') {
@@ -78,6 +88,7 @@ function createRouter({
 
     if (pathname === '/api/tasks' && req.method === 'GET') {
       try {
+        await ensureSheetConfigAvailable();
         const now = DateTime.now().setZone(timezone).startOf('day');
         const startDate = parseDateParam(searchParams.get('start'), now);
         const endDate = parseDateParam(searchParams.get('end'), startDate).endOf('day');
@@ -145,6 +156,7 @@ function createRouter({
 
         respondJson({ tasks: normalizedTasks, summary, range: { start: startDate.toISODate(), end: endDate.toISODate() } });
       } catch (error) {
+        if (handleConfigError(error)) return;
         logger.error('Lỗi khi trả về danh sách công việc', { error });
         res.statusCode = 500;
         respondJson({ message: 'Không lấy được danh sách công việc. Kiểm tra credentials và Sheet ID.' });
@@ -154,6 +166,7 @@ function createRouter({
 
     if (pathname === '/api/messages') {
       try {
+        await ensureSheetConfigAvailable();
         const now = DateTime.now().setZone(timezone);
         const sheet = await getSheet(now.month);
         const rows = await sheet.getRows();
@@ -169,6 +182,7 @@ function createRouter({
 
         respondJson({ messages });
       } catch (error) {
+        if (handleConfigError(error)) return;
         logger.error('Lỗi khi trả về danh sách tin nhắn', { error });
         res.statusCode = 500;
         respondJson({ message: 'Không lấy được tin nhắn. Kiểm tra credentials và Sheet ID.' });
@@ -177,6 +191,7 @@ function createRouter({
     }
 
     const handleReportResponse = async (targetDate, reportType, titlePrefix) => {
+      await ensureSheetConfigAvailable();
       const sheet = await getSheet(targetDate.month);
       const rows = await sheet.getRows();
       const filteredRows = filterRowsForReport(rows, targetDate, reportType);
@@ -197,6 +212,7 @@ function createRouter({
         const targetDate = parseDateParam(searchParams.get('date'), fallback);
         await handleReportResponse(targetDate, 'daily', 'BÁO CÁO CÔNG VIỆC');
       } catch (error) {
+        if (handleConfigError(error)) return;
         logger.error('Lỗi khi trả về báo cáo ngày', { error });
         res.statusCode = 500;
         res.end('Có lỗi xảy ra khi tạo báo cáo.');
@@ -210,6 +226,7 @@ function createRouter({
         const targetDate = parseDateParam(searchParams.get('date'), fallback);
         await handleReportResponse(targetDate, 'tomorrow', 'DANH SÁCH CÔNG VIỆC NGÀY MAI');
       } catch (error) {
+        if (handleConfigError(error)) return;
         logger.error('Lỗi khi trả về báo cáo ngày mai', { error });
         res.statusCode = 500;
         res.end('Có lỗi xảy ra khi tạo báo cáo.');
