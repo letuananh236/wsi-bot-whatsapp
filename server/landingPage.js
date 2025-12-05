@@ -224,11 +224,21 @@ function renderLandingPage() {
               rowsEl.innerHTML = '<tr><td colspan="6">Không có công việc trong khoảng đã chọn.</td></tr>';
             } else {
               rowsEl.innerHTML = data.tasks
-                .map(t => `<tr><td>${t.time}</td><td>${t.content}</td><td>${t.assignee}</td><td>${t.assigner}</td><td>${t.progress}</td><td>${t.note || ''}</td></tr>`)
+                .map(
+                  (t) =>
+                    '<tr>' +
+                    '<td>' + t.time + '</td>' +
+                    '<td>' + t.content + '</td>' +
+                    '<td>' + t.assignee + '</td>' +
+                    '<td>' + t.assigner + '</td>' +
+                    '<td>' + t.progress + '</td>' +
+                    '<td>' + (t.note || '') + '</td>' +
+                    '</tr>'
+                )
                 .join('');
             }
           } catch (e) {
-            rowsEl.innerHTML = `<tr><td colspan="6">Lỗi tải công việc: ${e.message}</td></tr>`;
+            rowsEl.innerHTML = '<tr><td colspan="6">Lỗi tải công việc: ' + e.message + '</td></tr>';
           } finally {
             state.loadingTasks = false;
           }
@@ -245,8 +255,20 @@ function renderLandingPage() {
               container.textContent = 'Chưa có tin nhắn để hiển thị.';
               return;
             }
-            const rows = data.messages.map(m => `<tr><td>${m.time}</td><td>${m.sender}</td><td>${m.content}</td></tr>`).join('');
-            container.innerHTML = `<table><thead><tr><th>Thời gian</th><th>Người gửi</th><th>Nội dung</th></tr></thead><tbody>${rows}</tbody></table>`;
+            const rows = data.messages
+              .map(
+                (m) =>
+                  '<tr>' +
+                  '<td>' + m.time + '</td>' +
+                  '<td>' + m.sender + '</td>' +
+                  '<td>' + m.content + '</td>' +
+                  '</tr>'
+              )
+              .join('');
+            container.innerHTML =
+              '<table><thead><tr><th>Thời gian</th><th>Người gửi</th><th>Nội dung</th></tr></thead><tbody>' +
+              rows +
+              '</tbody></table>';
           } catch (e) {
             container.textContent = 'Lỗi tải tin nhắn: ' + e.message;
           }
@@ -254,8 +276,8 @@ function renderLandingPage() {
 
         function openReport(type) {
           const date = document.getElementById('report-date').value || document.getElementById('start-date').value;
-          const params = date ? `?date=${date}` : '';
-          window.open(`/reports/${type}${params}`, '_blank');
+          const params = date ? '?date=' + date : '';
+          window.open('/reports/' + type + params, '_blank');
         }
 
         document.getElementById('creds-form').addEventListener('submit', saveCreds);
