@@ -10,6 +10,7 @@ function createRouter({
   resetSheetCache,
   ensureSheetConfigAvailable,
   getSheet,
+  testSheetConnection,
   filterRowsForReport,
   generateReportHTML,
   DateTime
@@ -52,39 +53,52 @@ function createRouter({
     }
 
     if (pathname === '/api/credentials') {
-      if (req.method === 'GET') {
-        const hasCredentials = await credentialsExist();
-        respondJson({ hasCredentials, sheetId: config.SHEET_ID });
+        if (req.method === 'GET') {
+          const hasCredentials = await credentialsExist();
+          respondJson({ hasCredentials, sheetId: config.SHEET_ID });
+          return;
+        }
+
+        if (req.method === 'POST') {
+          try {
+            const body = await parseRequestBody(req);
+            if (!body.client_email || !body.private_key || !body.sheet_id) {
+              res.statusCode = 400;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ message: 'Thiếu client_email, private_key hoặc sheet_id' }));
+              return;
+            }
+
+            await saveCreds({ client_email: body.client_email, private_key: body.private_key });
+            config.SHEET_ID = body.sheet_id;
+            resetSheetCache();
+
+            respondJson({ message: 'Đã lưu tài khoản dịch vụ và Sheet ID.' });
+          } catch (error) {
+            logger.error('Lỗi lưu credentials qua web', { error });
+            res.statusCode = 500;
+            respondJson({ message: 'Lưu credentials thất bại.' });
+          }
+          return;
+        }
+
+        res.statusCode = 405;
+        respondJson({ message: 'Method not allowed' });
         return;
       }
 
-      if (req.method === 'POST') {
+      if (pathname === '/api/credentials/test' && req.method === 'POST') {
         try {
-          const body = await parseRequestBody(req);
-          if (!body.client_email || !body.private_key || !body.sheet_id) {
-            res.statusCode = 400;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ message: 'Thiếu client_email, private_key hoặc sheet_id' }));
-            return;
-          }
-
-          await saveCreds({ client_email: body.client_email, private_key: body.private_key });
-          config.SHEET_ID = body.sheet_id;
-          resetSheetCache();
-
-          respondJson({ message: 'Đã lưu tài khoản dịch vụ và Sheet ID.' });
+          const result = await testSheetConnection();
+          respondJson({ ok: true, message: result.message, sheet: result.sheet });
         } catch (error) {
-          logger.error('Lỗi lưu credentials qua web', { error });
+          if (handleConfigError(error)) return;
+          logger.error('Lỗi kiểm tra kết nối Google Sheets', { error });
           res.statusCode = 500;
-          respondJson({ message: 'Lưu credentials thất bại.' });
+          respondJson({ ok: false, message: 'Kiểm tra kết nối thất bại. Vui lòng kiểm tra tài khoản dịch vụ và Sheet ID.' });
         }
         return;
       }
-
-      res.statusCode = 405;
-      respondJson({ message: 'Method not allowed' });
-      return;
-    }
 
     if (pathname === '/api/tasks' && req.method === 'GET') {
       try {

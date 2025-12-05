@@ -55,8 +55,12 @@ function renderLandingPage() {
             <input id="client_email" name="client_email" placeholder="service-account@project.iam.gserviceaccount.com" />
             <label for="private_key">private_key</label>
             <textarea id="private_key" name="private_key" placeholder="-----BEGIN PRIVATE KEY-----\n..."></textarea>
-            <button type="submit">Lưu cấu hình</button>
+            <div class="actions">
+              <button type="submit">Lưu cấu hình</button>
+              <button type="button" id="btn-test-conn" class="secondary">Kiểm tra kết nối</button>
+            </div>
             <div id="creds-status" class="status"></div>
+            <div id="test-status" class="status"></div>
           </form>
         </section>
 
@@ -186,6 +190,28 @@ function renderLandingPage() {
           }
         }
 
+        async function testConnection() {
+          const btn = document.getElementById('btn-test-conn');
+          const status = document.getElementById('test-status');
+          status.textContent = 'Đang kiểm tra kết nối...';
+          status.className = 'status';
+          btn.disabled = true;
+          try {
+            const res = await fetch('/api/credentials/test', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              throw new Error(data.message || 'Không thể kết nối tới Google Sheet.');
+            }
+            status.textContent = data.message || 'Kết nối thành công.';
+            status.className = 'status ok';
+          } catch (e) {
+            status.textContent = 'Lỗi kiểm tra: ' + e.message;
+            status.className = 'status err';
+          } finally {
+            btn.disabled = false;
+          }
+        }
+
         function getFilters() {
           const progress = Array.from(document.querySelectorAll('input[name="progress"]:checked')).map(i => i.value);
           return {
@@ -281,6 +307,7 @@ function renderLandingPage() {
         }
 
         document.getElementById('creds-form').addEventListener('submit', saveCreds);
+        document.getElementById('btn-test-conn').addEventListener('click', testConnection);
         document.getElementById('btn-daily').addEventListener('click', () => openReport('daily'));
         document.getElementById('btn-tomorrow').addEventListener('click', () => openReport('tomorrow'));
 

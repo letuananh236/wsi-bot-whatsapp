@@ -102,6 +102,22 @@ async function getSheet(month = null) {
   }
 }
 
+/**
+ * Kiểm tra khả năng kết nối tới Google Sheet hiện tại
+ * @param {number|null} month - Tháng cần kiểm tra, mặc định tháng hiện tại
+ * @returns {Promise<{sheet: {title: string, month: number}, message: string}>}
+ */
+async function testSheetConnection(month = null) {
+  const now = DateTime.now().setZone('Asia/Ho_Chi_Minh');
+  const targetMonth = month || now.month;
+  const sheet = await getSheet(targetMonth);
+  const sheetTitle = sheet.title || `T${targetMonth}`;
+  return {
+    sheet: { title: sheetTitle, month: targetMonth },
+    message: `Kết nối thành công tới sheet "${sheetTitle}".`
+  };
+}
+
 class ConfigMissingError extends Error {
   constructor(message) {
     super(message);
@@ -768,6 +784,7 @@ startWebServer({
   resetSheetCache,
   ensureSheetConfigAvailable,
   getSheet,
+  testSheetConnection,
   filterRowsForReport,
   generateReportHTML,
   DateTime

@@ -38,6 +38,7 @@ WhatsApp automation bot for WSI: reading group messages, logging tasks to Google
    - Khởi chạy web server song song tại `http://localhost:<WEB_PORT>` để cấu hình và xem dữ liệu:
      - Trang chủ `/`: dashboard web nhập `client_email`, `private_key`, `Google Sheet ID`, lọc công việc theo ngày/tiến độ/người liên quan, xem tin nhắn đã lưu, và mở báo cáo.
      - `/api/credentials` (GET/POST): đọc/lưu thông tin Service Account & Sheet ID.
+     - `/api/credentials/test` (POST): kiểm tra nhanh quyền truy cập Google Sheet với cấu hình hiện tại.
      - `/api/tasks` (GET): trả về danh sách công việc đã lọc (params: `start`, `end`, `progress`, `assignee`, `assigner`, `q`).
      - `/api/messages`: trả về JSON tin nhắn đã lưu trong sheet.
      - `/health`: kiểm tra trạng thái.
@@ -46,5 +47,6 @@ WhatsApp automation bot for WSI: reading group messages, logging tasks to Google
 
 ## Ghi chú vận hành
 - Log được ghi vào `combined.log` và `error.log` để tiện theo dõi.
+- Sau khi nhập Service Account trên dashboard, bấm **Kiểm tra kết nối** để xác nhận tài khoản có quyền đọc/ghi vào Google Sheet mục tiêu.
 - Ảnh báo cáo sinh tự động nằm trong thư mục `reports/`.
 - Thay đổi cấu trúc cột trên Google Sheet cần cập nhật `HEADERS` tương ứng trong `config.js`.
