@@ -30,6 +30,8 @@ const logger = winston.createLogger({
 let cachedSheet = null;
 let browserInstance = null;
 let configWarningLogged = false;
+const SHEET_ERROR_COOLDOWN_MS = 60000;
+let lastSheetErrorLogTime = 0;
 
 /**
  * Xóa cache sheet khi thay đổi thông tin cấu hình
@@ -37,6 +39,14 @@ let configWarningLogged = false;
 function resetSheetCache() {
   cachedSheet = null;
   configWarningLogged = false;
+}
+
+function logSheetError(error, message = 'Lỗi truy cập Google Sheets') {
+  const now = Date.now();
+  if (now - lastSheetErrorLogTime >= SHEET_ERROR_COOLDOWN_MS) {
+    logger.error(message, { error });
+    lastSheetErrorLogTime = now;
+  }
 }
 
 /**
@@ -77,6 +87,7 @@ async function getSheet(month = null) {
     }
 
     cachedSheet = { sheet, month: targetMonth };
+    lastSheetErrorLogTime = 0;
     return sheet;
   } catch (error) {
     if (error && error.code === 'CONFIG_MISSING') {
@@ -85,7 +96,7 @@ async function getSheet(month = null) {
         configWarningLogged = true;
       }
     } else {
-      logger.error('Lỗi truy cập Google Sheets', { error });
+      logSheetError(error);
     }
     throw error;
   }
@@ -638,7 +649,7 @@ client.on('ready', async () => {
       logger.warn(`${error.message} Bỏ qua khởi động cron cho đến khi cấu hình xong.`);
       return;
     }
-    logger.error('Lỗi khi khởi động bot', { error });
+    logSheetError(error, 'Lỗi khi khởi động bot');
   }
 });
 
