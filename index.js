@@ -48,7 +48,13 @@ function resetSheetCache() {
 function logSheetError(error, message = 'Lỗi truy cập Google Sheets') {
   const now = Date.now();
   if (now - lastSheetErrorLogTime >= SHEET_ERROR_COOLDOWN_MS) {
-    logger.error(message, { error });
+    logger.error(message, {
+      error: {
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack
+      }
+    });
     lastSheetErrorLogTime = now;
   }
 }
@@ -683,15 +689,15 @@ client.on('ready', async () => {
   }
   clientReady = true;
   try {
+    await ensureSheetConfigAvailable();
     await getSheet();
     scheduleCronJobs();
   } catch (error) {
     if (isConfigMissingError(error)) {
-      logger.warn(`${error.message} Bỏ qua khởi động cron cho đến khi cấu hình xong.`);
-      scheduleCronJobs();
-      return;
+      logger.warn(`${error.message} Bỏ qua truy cập Google Sheets cho đến khi cấu hình xong.`);
+    } else {
+      logSheetError(error, 'Lỗi khi khởi động bot');
     }
-    logSheetError(error, 'Lỗi khi khởi động bot');
   }
 });
 
