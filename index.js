@@ -32,6 +32,10 @@ let browserInstance = null;
 let configWarningLogged = false;
 const SHEET_ERROR_COOLDOWN_MS = 60000;
 let lastSheetErrorLogTime = 0;
+let cronJobsScheduled = false;
+let clientReady = false;
+
+const isConfigMissingError = (error) => error && error.code === 'CONFIG_MISSING';
 
 /**
  * Xóa cache sheet khi thay đổi thông tin cấu hình
@@ -90,7 +94,7 @@ async function getSheet(month = null) {
     lastSheetErrorLogTime = 0;
     return sheet;
   } catch (error) {
-    if (error && error.code === 'CONFIG_MISSING') {
+    if (isConfigMissingError(error)) {
       if (!configWarningLogged) {
         logger.warn(error.message);
         configWarningLogged = true;
@@ -517,9 +521,21 @@ async function fetchAllGroupMessages(sheet) {
 
 /**
  * Lên lịch các tác vụ cron
- * @param {GoogleSpreadsheetWorksheet} sheet - Sheet Google
  */
-async function scheduleCronJobs(sheet) {
+function scheduleCronJobs() {
+  if (cronJobsScheduled) {
+    logger.info('Cron jobs đã được thiết lập, bỏ qua cài đặt lại.');
+    return;
+  }
+
+  const handleCronError = (error, context) => {
+    if (isConfigMissingError(error)) {
+      logger.warn(`${context}. ${error.message}`);
+      return;
+    }
+    logger.error(context, { error });
+  };
+
   cron.schedule('30 21 * * 0', async () => {
     logger.info('Chạy báo cáo cuối tuần');
     try {
@@ -577,7 +593,7 @@ async function scheduleCronJobs(sheet) {
         logger.info(`Đã lên lịch ${newRows.length} công việc từ thứ Sáu cho thứ Hai`);
       }
     } catch (error) {
-      logger.error('Lỗi khi chạy báo cáo cuối tuần', { error });
+      handleCronError(error, 'Lỗi khi chạy báo cáo cuối tuần');
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' });
 
@@ -589,19 +605,22 @@ async function scheduleCronJobs(sheet) {
       const today = now.toFormat('dd/MM/yyyy');
       const tomorrow = now.plus({ days: 1 }).toFormat('dd/MM/yyyy');
 
-      await sendReport(config.AUTHORIZED_PHONE_NUMBER, 
+      await sendReport(config.AUTHORIZED_PHONE_NUMBER,
         await generateReport(sheet, now, 'daily', 'BÁO CÁO CÔNG VIỆC'),
         `Báo cáo công việc ngày ${today}`);
-      await sendReport(config.AUTHORIZED_PHONE_NUMBER, 
+      await sendReport(config.AUTHORIZED_PHONE_NUMBER,
         await generateReport(sheet, now.plus({ days: 1 }), 'tomorrow', 'DANH SÁCH CÔNG VIỆC NGÀY MAI'),
         `Danh sách công việc ngày mai ${tomorrow}`);
-      
+
       const chat = await client.getChatById(config.AUTHORIZED_PHONE_NUMBER);
       await chat.sendMessage(`Đã gửi báo cáo ngày ${today} và danh sách ngày mai thành công!`);
     } catch (error) {
-      logger.error('Lỗi khi chạy báo cáo hàng ngày', { error });
+      handleCronError(error, 'Lỗi khi chạy báo cáo hàng ngày');
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' });
+
+  cronJobsScheduled = true;
+  logger.info('Đã khởi tạo lịch cron cho báo cáo.');
 }
 
 // Khởi tạo WhatsApp client
@@ -638,6 +657,7 @@ async function restartWhatsAppClient(reason) {
   } catch (destroyError) {
     logger.warn('Lỗi khi hủy client cũ trước khi khởi động lại', { error: destroyError });
   }
+  clientReady = false;
   setTimeout(() => initializeWhatsAppClient(), 5000);
 }
 
@@ -656,13 +676,19 @@ client.on('auth_failure', message => {
 });
 
 client.on('ready', async () => {
-  logger.info('Bot WhatsApp đã sẵn sàng');
+  if (clientReady) {
+    logger.info('Bot WhatsApp đã sẵn sàng (kết nối lại)');
+  } else {
+    logger.info('Bot WhatsApp đã sẵn sàng');
+  }
+  clientReady = true;
   try {
-    const sheet = await getSheet();
-    await scheduleCronJobs(sheet);
+    await getSheet();
+    scheduleCronJobs();
   } catch (error) {
-    if (error && error.code === 'CONFIG_MISSING') {
+    if (isConfigMissingError(error)) {
       logger.warn(`${error.message} Bỏ qua khởi động cron cho đến khi cấu hình xong.`);
+      scheduleCronJobs();
       return;
     }
     logSheetError(error, 'Lỗi khi khởi động bot');
@@ -677,7 +703,7 @@ client.on('message', async msg => {
     try {
       sheet = await getSheet();
     } catch (error) {
-      if (error && error.code === 'CONFIG_MISSING') {
+      if (isConfigMissingError(error)) {
         logger.warn('Bỏ qua xử lý tin nhắn vì chưa cấu hình Google Sheets.');
         if (senderId === config.AUTHORIZED_PHONE_NUMBER && msg.to === config.BOT_PHONE_NUMBER) {
           await msg.reply(error.message);
