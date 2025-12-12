@@ -10,6 +10,7 @@ const cron = require('node-cron');
 const pRetry = require('p-retry');
 const winston = require('winston');
 const config = require('./config');
+const { startWebServer } = require('./server/webServer');
 
 // Khởi tạo logger
 const logger = winston.createLogger({
@@ -28,6 +29,35 @@ const logger = winston.createLogger({
 // Cache Google Sheet và Puppeteer
 let cachedSheet = null;
 let browserInstance = null;
+let configWarningLogged = false;
+const SHEET_ERROR_COOLDOWN_MS = 60000;
+let lastSheetErrorLogTime = 0;
+let cronJobsScheduled = false;
+let clientReady = false;
+
+const isConfigMissingError = (error) => error && error.code === 'CONFIG_MISSING';
+
+/**
+ * Xóa cache sheet khi thay đổi thông tin cấu hình
+ */
+function resetSheetCache() {
+  cachedSheet = null;
+  configWarningLogged = false;
+}
+
+function logSheetError(error, message = 'Lỗi truy cập Google Sheets') {
+  const now = Date.now();
+  if (now - lastSheetErrorLogTime >= SHEET_ERROR_COOLDOWN_MS) {
+    logger.error(message, {
+      error: {
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack
+      }
+    });
+    lastSheetErrorLogTime = now;
+  }
+}
 
 /**
  * Truy cập Google Sheet với retry logic
@@ -36,6 +66,8 @@ let browserInstance = null;
  */
 async function getSheet(month = null) {
   try {
+    await ensureSheetConfigAvailable();
+    configWarningLogged = false;
     if (cachedSheet && (!month || cachedSheet.month === month)) {
       return cachedSheet.sheet;
     }
@@ -60,15 +92,58 @@ async function getSheet(month = null) {
     }
 
     if (!sheet.headerValues || !arraysEqual(sheet.headerValues, config.HEADERS)) {
-      await sheet.setHeaderRow(config.headers);
+      await sheet.setHeaderRow(config.HEADERS);
       logger.info(`Đã thiết lập tiêu đề cho sheet: ${sheetTitle}`);
     }
 
     cachedSheet = { sheet, month: targetMonth };
+    lastSheetErrorLogTime = 0;
     return sheet;
   } catch (error) {
-    logger.error('Lỗi truy cập Google Sheets', { error });
+    if (isConfigMissingError(error)) {
+      if (!configWarningLogged) {
+        logger.warn(error.message);
+        configWarningLogged = true;
+      }
+    } else {
+      logSheetError(error);
+    }
     throw error;
+  }
+}
+
+/**
+ * Kiểm tra khả năng kết nối tới Google Sheet hiện tại
+ * @param {number|null} month - Tháng cần kiểm tra, mặc định tháng hiện tại
+ * @returns {Promise<{sheet: {title: string, month: number}, message: string}>}
+ */
+async function testSheetConnection(month = null) {
+  const now = DateTime.now().setZone('Asia/Ho_Chi_Minh');
+  const targetMonth = month || now.month;
+  const sheet = await getSheet(targetMonth);
+  const sheetTitle = sheet.title || `T${targetMonth}`;
+  return {
+    sheet: { title: sheetTitle, month: targetMonth },
+    message: `Kết nối thành công tới sheet "${sheetTitle}".`
+  };
+}
+
+class ConfigMissingError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ConfigMissingError';
+    this.code = 'CONFIG_MISSING';
+  }
+}
+
+async function ensureSheetConfigAvailable() {
+  if (!config.SHEET_ID) {
+    throw new ConfigMissingError('Chưa cấu hình SHEET_ID. Vui lòng nhập Sheet ID trên dashboard.');
+  }
+
+  const hasCreds = await credentialsExist();
+  if (!hasCreds) {
+    throw new ConfigMissingError('Chưa có tài khoản dịch vụ Google. Vui lòng tải credentials trên dashboard.');
   }
 }
 
@@ -93,6 +168,28 @@ async function loadCreds() {
   } catch (error) {
     logger.error('Không thể đọc file credentials', { error });
     throw error;
+  }
+}
+
+/**
+ * Lưu credentials xuống file
+ * @param {{client_email: string, private_key: string}} creds
+ */
+async function saveCreds(creds) {
+  await fs.writeFile(config.SERVICE_ACCOUNT_FILE, JSON.stringify(creds, null, 2), 'utf8');
+  resetSheetCache();
+}
+
+/**
+ * Kiểm tra file credentials đã tồn tại chưa
+ * @returns {Promise<boolean>}
+ */
+async function credentialsExist() {
+  try {
+    await fs.access(config.SERVICE_ACCOUNT_FILE);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -226,6 +323,32 @@ function generateReportHTML(rows, title) {
 }
 
 /**
+ * Lọc dữ liệu báo cáo dựa trên loại báo cáo
+ * @param {Array} rows - Danh sách hàng từ Google Sheet
+ * @param {DateTime} date - Ngày cần lọc
+ * @param {'daily'|'tomorrow'} reportType - Loại báo cáo
+ * @returns {Array} - Danh sách hàng đã lọc
+ */
+function filterRowsForReport(rows, date, reportType) {
+  const formattedDate = date.toFormat('dd/MM/yyyy');
+
+  if (reportType === 'daily') {
+    return rows.filter(row =>
+      row['Nội dung công việc'] !== `Ngày ${formattedDate}` &&
+      row['Thời gian']?.startsWith(formattedDate) &&
+      (row['Tiến Độ'] === 'Chưa Hoàn Thành' || row['Tiến Độ'] === 'Hoàn Thành')
+    );
+  }
+
+  return rows.filter(row =>
+    row['Thời gian']?.startsWith(formattedDate) &&
+    row['Nội dung công việc'] &&
+    !row['Nội dung công việc'].match(/^Ngày\s/) &&
+    row['Tiến Độ'] !== 'Hoàn Thành'
+  );
+}
+
+/**
  * Tạo báo cáo và lưu thành ảnh
  * @param {GoogleSpreadsheetWorksheet} sheet - Sheet Google
  * @param {DateTime} date - Ngày báo cáo
@@ -237,22 +360,7 @@ async function generateReport(sheet, date, reportType, titlePrefix) {
   try {
     const formattedDate = date.toFormat('dd/MM/yyyy');
     const rows = await sheet.getRows();
-    let filteredRows;
-
-    if (reportType === 'daily') {
-      filteredRows = rows.filter(row =>
-        row['Nội dung công việc'] !== `Ngày ${formattedDate}` &&
-        row['Thời gian']?.startsWith(formattedDate) &&
-        (row['Tiến Độ'] === 'Chưa Hoàn Thành' || row['Tiến Độ'] === 'Hoàn Thành')
-      );
-    } else {
-      filteredRows = rows.filter(row =>
-        row['Thời gian']?.startsWith(formattedDate) &&
-        row['Nội dung công việc'] &&
-        !row['Nội dung công việc'].match(/^Ngày\s/) &&
-        row['Tiến Độ'] !== 'Hoàn Thành'
-      );
-    }
+    const filteredRows = filterRowsForReport(rows, date, reportType);
 
     if (filteredRows.length === 0) {
       logger.warn(`Không có dữ liệu cho ${reportType} báo cáo ngày ${formattedDate}`);
@@ -278,6 +386,8 @@ async function generateReport(sheet, date, reportType, titlePrefix) {
     return null;
   }
 }
+
+
 
 /**
  * Gửi báo cáo qua WhatsApp
@@ -417,9 +527,21 @@ async function fetchAllGroupMessages(sheet) {
 
 /**
  * Lên lịch các tác vụ cron
- * @param {GoogleSpreadsheetWorksheet} sheet - Sheet Google
  */
-async function scheduleCronJobs(sheet) {
+function scheduleCronJobs() {
+  if (cronJobsScheduled) {
+    logger.info('Cron jobs đã được thiết lập, bỏ qua cài đặt lại.');
+    return;
+  }
+
+  const handleCronError = (error, context) => {
+    if (isConfigMissingError(error)) {
+      logger.warn(`${context}. ${error.message}`);
+      return;
+    }
+    logger.error(context, { error });
+  };
+
   cron.schedule('30 21 * * 0', async () => {
     logger.info('Chạy báo cáo cuối tuần');
     try {
@@ -477,7 +599,7 @@ async function scheduleCronJobs(sheet) {
         logger.info(`Đã lên lịch ${newRows.length} công việc từ thứ Sáu cho thứ Hai`);
       }
     } catch (error) {
-      logger.error('Lỗi khi chạy báo cáo cuối tuần', { error });
+      handleCronError(error, 'Lỗi khi chạy báo cáo cuối tuần');
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' });
 
@@ -489,38 +611,93 @@ async function scheduleCronJobs(sheet) {
       const today = now.toFormat('dd/MM/yyyy');
       const tomorrow = now.plus({ days: 1 }).toFormat('dd/MM/yyyy');
 
-      await sendReport(config.AUTHORIZED_PHONE_NUMBER, 
+      await sendReport(config.AUTHORIZED_PHONE_NUMBER,
         await generateReport(sheet, now, 'daily', 'BÁO CÁO CÔNG VIỆC'),
         `Báo cáo công việc ngày ${today}`);
-      await sendReport(config.AUTHORIZED_PHONE_NUMBER, 
+      await sendReport(config.AUTHORIZED_PHONE_NUMBER,
         await generateReport(sheet, now.plus({ days: 1 }), 'tomorrow', 'DANH SÁCH CÔNG VIỆC NGÀY MAI'),
         `Danh sách công việc ngày mai ${tomorrow}`);
-      
+
       const chat = await client.getChatById(config.AUTHORIZED_PHONE_NUMBER);
       await chat.sendMessage(`Đã gửi báo cáo ngày ${today} và danh sách ngày mai thành công!`);
     } catch (error) {
-      logger.error('Lỗi khi chạy báo cáo hàng ngày', { error });
+      handleCronError(error, 'Lỗi khi chạy báo cáo hàng ngày');
     }
   }, { timezone: 'Asia/Ho_Chi_Minh' });
+
+  cronJobsScheduled = true;
+  logger.info('Đã khởi tạo lịch cron cho báo cáo.');
 }
 
 // Khởi tạo WhatsApp client
 const client = new Client({
-  authStrategy: new LocalAuth()
+  authStrategy: new LocalAuth(),
+  puppeteer: {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    executablePath: puppeteer.executablePath()
+  }
 });
+
+let initializingClient = false;
+
+async function initializeWhatsAppClient() {
+  if (initializingClient) return;
+  initializingClient = true;
+
+  try {
+    logger.info('Khởi động WhatsApp client...');
+    await client.initialize();
+  } catch (error) {
+    logger.error('Khởi động WhatsApp client thất bại, sẽ thử lại sau.', { error });
+    setTimeout(() => initializeWhatsAppClient(), 5000);
+  } finally {
+    initializingClient = false;
+  }
+}
+
+async function restartWhatsAppClient(reason) {
+  logger.warn(`WhatsApp client bị ngắt kết nối (${reason || 'không rõ lý do'}). Đang khởi động lại...`);
+  try {
+    await client.destroy();
+  } catch (destroyError) {
+    logger.warn('Lỗi khi hủy client cũ trước khi khởi động lại', { error: destroyError });
+  }
+  clientReady = false;
+  setTimeout(() => initializeWhatsAppClient(), 5000);
+}
 
 client.on('qr', qr => {
   logger.info('Tạo QR code để đăng nhập WhatsApp');
   qrcode.generate(qr, { small: true });
 });
 
+client.on('disconnected', reason => {
+  restartWhatsAppClient(reason);
+});
+
+client.on('auth_failure', message => {
+  logger.error(`Xác thực WhatsApp thất bại: ${message}. Sẽ thử khởi động lại.`);
+  restartWhatsAppClient('auth_failure');
+});
+
 client.on('ready', async () => {
-  logger.info('Bot WhatsApp đã sẵn sàng');
+  if (clientReady) {
+    logger.info('Bot WhatsApp đã sẵn sàng (kết nối lại)');
+  } else {
+    logger.info('Bot WhatsApp đã sẵn sàng');
+  }
+  clientReady = true;
   try {
-    const sheet = await getSheet();
-    await scheduleCronJobs(sheet);
+    await ensureSheetConfigAvailable();
+    await getSheet();
+    scheduleCronJobs();
   } catch (error) {
-    logger.error('Lỗi khi khởi động bot', { error });
+    if (isConfigMissingError(error)) {
+      logger.warn(`${error.message} Bỏ qua truy cập Google Sheets cho đến khi cấu hình xong.`);
+    } else {
+      logSheetError(error, 'Lỗi khi khởi động bot');
+    }
   }
 });
 
@@ -528,7 +705,19 @@ client.on('message', async msg => {
   try {
     const chat = await msg.getChat();
     const senderId = msg.from;
-    const sheet = await getSheet();
+    let sheet;
+    try {
+      sheet = await getSheet();
+    } catch (error) {
+      if (isConfigMissingError(error)) {
+        logger.warn('Bỏ qua xử lý tin nhắn vì chưa cấu hình Google Sheets.');
+        if (senderId === config.AUTHORIZED_PHONE_NUMBER && msg.to === config.BOT_PHONE_NUMBER) {
+          await msg.reply(error.message);
+        }
+        return;
+      }
+      throw error;
+    }
 
     // Lưu tin nhắn từ nhóm mục tiêu
     if (chat.id._serialized.trim() === config.TARGET_GROUP_ID.trim()) {
@@ -619,5 +808,19 @@ client.on('message', async msg => {
   }
 });
 
-// Khởi động bot
-client.initialize();
+startWebServer({
+  config,
+  logger,
+  credentialsExist,
+  saveCreds,
+  resetSheetCache,
+  ensureSheetConfigAvailable,
+  getSheet,
+  testSheetConnection,
+  filterRowsForReport,
+  generateReportHTML,
+  DateTime
+});
+
+// Khởi động bot với cơ chế tự phục hồi khi phiên trình duyệt lỗi
+initializeWhatsAppClient();
